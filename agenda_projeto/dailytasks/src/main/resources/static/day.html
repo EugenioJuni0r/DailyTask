@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daily Tasks - Dia</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  header h1 { text-transform:capitalize; font-size:1.15rem; }
+  #add { width:2.4rem; height:2.4rem; padding:0; border-radius:50%; background:var(--surface); }
+
+  /* resumo do dia */
+  #summary { padding:0 1rem 1rem; }
+  .sumhead { display:flex; align-items:center; justify-content:space-between; margin-bottom:.2rem; }
+  #summary h2 { margin:0; font-size:1rem; }
+  #clear { padding:.3rem .7rem; border:1px solid var(--sun); border-radius:6px; background:none; color:var(--sun); font:inherit; font-size:.85rem; cursor:pointer; }
+  #clear[hidden] { display:none; }
+  #sumText { margin:0 0 .6rem; font-size:.9rem; color:var(--dim); }
+  #agenda { list-style:none; margin:0; padding:0; display:grid; gap:.4rem; }
+  #agenda li { display:flex; gap:.7rem; align-items:baseline; padding:.45rem .7rem; border-radius:6px; font-size:.95rem; }
+  #agenda .t { font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  #agenda .d { margin-left:auto; font-size:.85rem; opacity:.8; white-space:nowrap; }
+
+  /* planilha */
+  #sheet { position:relative; border-top:1px solid var(--line); }
+  .row { display:flex; height:var(--row); border-bottom:1px solid var(--line); cursor:pointer; }
+  .row:hover { background:var(--hover); }
+  .n { width:64px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+       border-right:1px solid var(--line); font-weight:600; }
+  .n small { font-weight:400; font-size:.65rem; color:var(--dim); }
+  #layer { position:absolute; top:0; left:64px; right:0; pointer-events:none; }
+  .ev { position:absolute; left:4px; right:4px; padding:3px 6px; border-radius:4px; overflow:hidden; pointer-events:auto;
+        display:flex; justify-content:space-between; gap:.4rem; font-size:.82rem; line-height:1.25; }
+  .ev small { display:block; opacity:.8; }
+  .ev button { align-self:flex-start; background:none; border:0; color:inherit; font-size:1rem; line-height:1; cursor:pointer; }
+
+  /* janela de novo evento */
+  #overlay { display:none; position:fixed; inset:0; z-index:20; background:rgba(0,0,0,.5); align-items:center; justify-content:center; }
+  #overlay.open { display:flex; }
+  #modal { width:min(360px,92%); max-height:96vh; overflow-y:auto; padding:1.2rem; border-radius:10px; background:var(--surface); }
+  #modal h2 { margin:0 0 .6rem; font-size:1.1rem; }
+  #modal label { display:block; font-size:.9rem; }
+  #name { width:100%; margin-top:.3rem; padding:.5rem; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--text); font:inherit; }
+  #error { display:none; margin:.6rem 0 0; padding:.4rem; border-radius:6px; background:var(--err-bg); color:var(--err-fg); font-size:.9rem; }
+
+  .swatches { display:flex; gap:.6rem; margin:.8rem 0 0; }
+  .sw { position:relative; width:28px; height:28px; border-radius:50%; cursor:pointer; border:1px solid rgba(255,255,255,.25); background:currentColor; }
+  .sw input { position:absolute; inset:0; margin:0; opacity:0; cursor:pointer; }
+  .sw:has(input:checked) { box-shadow:0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
+  .sw:has(input:focus-visible) { outline:2px solid var(--accent); outline-offset:3px; }
+
+  .times { display:flex; justify-content:center; gap:1.2rem; margin:.8rem 0; }
+  .tp { text-align:center; font-size:.9rem; }
+  .wheels { --item:36px; position:relative; display:flex; align-items:center; justify-content:center; gap:.2rem; margin-top:.3rem; }
+  .wheels::before { content:""; position:absolute; left:0; right:0; top:50%; height:var(--item); transform:translateY(-50%);
+                    border-radius:6px; background:color-mix(in srgb, var(--text) 10%, transparent); pointer-events:none; }
+  .wheel { position:relative; z-index:1; width:56px; height:calc(var(--item) * 3); padding-block:var(--item); overflow-y:auto;
+           scroll-snap-type:y mandatory; overscroll-behavior:contain; scrollbar-width:none; }
+  .wheel::-webkit-scrollbar { display:none; }
+  .wheel:focus-visible { outline:2px solid var(--accent); border-radius:6px; }
+  .wheel div { height:var(--item); line-height:var(--item); text-align:center; scroll-snap-align:center; cursor:pointer; font-variant-numeric:tabular-nums; }
+
+  .rep { display:flex !important; align-items:center; gap:.5rem; margin-bottom:.4rem; }
+  .actions { margin-top:.8rem; text-align:right; }
+  .actions button { padding:.45rem .95rem; border:0; border-radius:6px; background:var(--line); color:var(--text); font:inherit; cursor:pointer; }
+  .actions #save { background:var(--accent); color:#fff; }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="icon" id="back" href="/" aria-label="Voltar ao calendário">&larr;</a>
+  <h1 id="title"></h1>
+  <button class="icon" id="add" aria-label="Adicionar evento">+</button>
+</header>
+
+<section id="summary" aria-live="polite">
+  <div class="sumhead"><h2>Seu dia</h2><button id="clear" hidden>Limpar dia</button></div>
+  <p id="sumText"></p>
+  <ol id="agenda"></ol>
+</section>
+
+<div id="sheet"><div id="layer"></div></div>
+
+<div id="overlay">
+  <div id="modal" role="dialog" aria-label="Novo evento">
+    <h2>Novo evento</h2>
+    <label>Nome <input type="text" id="name" maxlength="50" placeholder="máx. 50 caracteres"></label>
+
+    <div class="swatches" role="radiogroup" aria-label="Cor do evento">
+      <label class="sw c0"><input type="radio" name="color" value="0" checked aria-label="Azul"></label>
+      <label class="sw c1"><input type="radio" name="color" value="1" aria-label="Verde"></label>
+      <label class="sw c2"><input type="radio" name="color" value="2" aria-label="Amarelo"></label>
+      <label class="sw c3"><input type="radio" name="color" value="3" aria-label="Rosa"></label>
+      <label class="sw c4"><input type="radio" name="color" value="4" aria-label="Roxo"></label>
+      <label class="sw c5"><input type="radio" name="color" value="5" aria-label="Vermelho"></label>
+    </div>
+
+    <div class="times">
+      <div class="tp">Início
+        <div class="wheels"><div class="wheel" id="sh" tabindex="0" aria-label="Hora de início"></div>:<div class="wheel" id="sm" tabindex="0" aria-label="Minuto de início"></div></div>
+      </div>
+      <div class="tp">Fim
+        <div class="wheels"><div class="wheel" id="eh" tabindex="0" aria-label="Hora de fim"></div>:<div class="wheel" id="em" tabindex="0" aria-label="Minuto de fim"></div></div>
+      </div>
+    </div>
+
+    <label class="rep"><input type="checkbox" id="repeat"> Repetir <span id="repeatDay"></span> até o fim do ano</label>
+    <p id="error"></p>
+
+    <div class="actions">
+      <button id="cancel">Cancelar</button>
+      <button id="save">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const YEAR = 2027;
+  const ROW = 52;   // altura de cada linha da planilha, em px (igual a --row)
+  const ITEM = 36;  // altura de cada item das listas de hora (igual a --item)
+
+  const [y, mo, d] = (new URLSearchParams(location.search).get("date") || "2027-01-01").split("-").map(Number);
+  const dayIndex = Math.round((Date.UTC(y, mo - 1, d) - Date.UTC(YEAR, 0, 1)) / 864e5);
+  if (y !== YEAR || !(dayIndex >= 0 && dayIndex <= 364)) location.replace("/");
+
+  const sheet = document.getElementById("sheet");
+  const layer = document.getElementById("layer");
+  const overlay = document.getElementById("overlay");
+  const errorBox = document.getElementById("error");
+  const nameInput = document.getElementById("name");
+  const repeatBox = document.getElementById("repeat");
+  const sh = document.getElementById("sh"), sm = document.getElementById("sm");
+  const eh = document.getElementById("eh"), em = document.getElementById("em");
+
+  let diaryId = null;
+  let eventCount = 0;
+  const clearBtn = document.getElementById("clear");
+
+  const pad = n => String(n).padStart(2, "0");
+  const hhmm = m => pad(Math.floor(m / 60)) + ":" + pad(m % 60);
+  const dur = m => { const h = Math.floor(m / 60), r = m % 60; return h && r ? h + "h" + pad(r) : h ? h + "h" : r + "min"; };
+  const baseUrl = () => "/diaries/" + diaryId + "/days/" + dayIndex + "/events";
+
+  const date = new Date(y, mo - 1, d);
+  document.getElementById("title").textContent =
+    date.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
+  document.getElementById("back").href = "/?m=" + (mo - 1);
+
+  const weekday = date.toLocaleDateString("pt-BR", { weekday: "long" });
+  document.getElementById("repeatDay").textContent = (weekday.endsWith("feira") ? "toda " : "todo ") + weekday;
+
+  // ---- listas de hora: rolagem comum, parando no primeiro e no último item (sem dar a volta) ----
+  const idx = el => Math.round(el.scrollTop / ITEM);
+  const setIdx = (el, i) => { el.scrollTop = i * ITEM; };
+
+  function fill(el, labels) {
+    el.replaceChildren(...labels.map((text, i) => {
+      const item = document.createElement("div");
+      item.textContent = text;
+      item.onclick = () => el.scrollTo({ top: i * ITEM, behavior: "smooth" });
+      return item;
+    }));
+    el.onkeydown = e => {
+      const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      el.scrollTo({ top: Math.min(labels.length - 1, Math.max(0, idx(el) + step)) * ITEM, behavior: "smooth" });
+    };
+  }
+
+  const HOURS = Array.from({ length: 24 }, (_, i) => pad(i));    // 00 até 23
+  const MINUTES = Array.from({ length: 60 }, (_, i) => pad(i));  // 00 até 59
+  [sh, eh].forEach(el => fill(el, HOURS));
+  [sm, em].forEach(el => fill(el, MINUTES));
+
+  const readTime = (h, m) => idx(h) * 60 + idx(m);
+  function setTime(h, m, t) {
+    setIdx(h, Math.floor(t / 60));
+    setIdx(m, t % 60);
+  }
+
+  // ---- planilha com as 24 linhas ----
+  for (let h = 0; h < 24; h++) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = '<div class="n">' + h + "<small>" + pad(h) + "h–" + pad(h + 1) + "h</small></div>";
+    row.onclick = () => openModal(h * 60, Math.min(1439, h * 60 + 60));
+    sheet.insertBefore(row, layer);
+  }
+  layer.style.height = 24 * ROW + "px";
+
+  function renderSummary(events) {
+    const busy = events.reduce((sum, e) => sum + e.endMinute - e.startMinute, 0);
+    eventCount = events.length;
+    clearBtn.hidden = events.length === 0;
+    document.getElementById("sumText").textContent = events.length
+      ? events.length + (events.length === 1 ? " evento" : " eventos") + " · Ocupado: " + dur(busy) + " · Livre: " + dur(1440 - busy)
+      : "Nada marcado neste dia. Toque numa linha da planilha para adicionar um evento.";
+
+    document.getElementById("agenda").replaceChildren(...events.map(ev => {
+      const li = document.createElement("li");
+      li.className = "c" + ev.color;
+      const t = document.createElement("span");
+      t.className = "t";
+      t.textContent = hhmm(ev.startMinute) + "–" + hhmm(ev.endMinute);
+      const name = document.createElement("span");
+      name.textContent = ev.name;
+      const len = document.createElement("span");
+      len.className = "d";
+      len.textContent = dur(ev.endMinute - ev.startMinute);
+      li.append(t, name, len);
+      return li;
+    }));
+  }
+
+  async function load() {
+    layer.innerHTML = "";
+    let events = [];
+    try {
+      const r = await fetch("/diaries/" + diaryId + "/events?from=" + dayIndex + "&to=" + dayIndex);
+      if (r.ok) events = await r.json();
+    } catch (e) { /* sem eventos se o servidor falhar */ }
+
+    renderSummary(events);
+
+    for (const ev of events) {
+      const height = (ev.endMinute - ev.startMinute) / 60 * ROW - 2;
+      const box = document.createElement("div");
+      box.className = "ev c" + ev.color;
+      box.style.top = ev.startMinute / 60 * ROW + 1 + "px";
+      box.style.height = height + "px";
+
+      const text = document.createElement("div");
+      text.append(ev.name);
+      if (height >= 40) {
+        const time = document.createElement("small");
+        time.textContent = hhmm(ev.startMinute) + " - " + hhmm(ev.endMinute);
+        text.append(time);
+      }
+
+      const remove = document.createElement("button");
+      remove.textContent = "×";
+      remove.title = "Remover";
+      remove.onclick = () => removeEvent(ev.id);
+
+      box.append(text, remove);
+      layer.append(box);
+    }
+  }
+
+  function openModal(start, end) {
+    nameInput.value = "";
+    repeatBox.checked = false;
+    document.querySelector('input[name="color"][value="0"]').checked = true;
+    errorBox.style.display = "none";
+    overlay.classList.add("open");          // abrir antes: listas escondidas não aceitam rolagem
+    setTime(sh, sm, start);
+    setTime(eh, em, end);
+    nameInput.focus();
+  }
+
+  function closeModal() { overlay.classList.remove("open"); }
+  function showError(text) { errorBox.textContent = text; errorBox.style.display = "block"; }
+
+  async function readError(response) {
+    try { return (await response.json()).erro || "Erro " + response.status; }
+    catch (e) { return "Erro " + response.status; }
+  }
+
+  async function saveEvent() {
+    const start = readTime(sh, sm), end = readTime(eh, em);
+    if (start >= end) { showError("O início precisa ser antes do fim."); return; }
+    const response = await fetch(baseUrl(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: nameInput.value,
+        startMinute: start,
+        endMinute: end,
+        color: Number(document.querySelector('input[name="color"]:checked').value),
+        repeatWeekly: repeatBox.checked
+      })
+    });
+    if (!response.ok) { showError(await readError(response)); return; }
+    closeModal();
+    load();
+  }
+
+  async function removeEvent(id) {
+    await fetch(baseUrl() + "/" + id, { method: "DELETE" });
+    load();
+  }
+
+  document.getElementById("add").onclick = () => openModal(540, 600);
+  clearBtn.onclick = async () => {
+    const msg = eventCount === 1 ? "Remover o evento deste dia?" : "Remover todos os " + eventCount + " eventos deste dia?";
+    if (!confirm(msg)) return;
+    await fetch(baseUrl(), { method: "DELETE" });
+    load();
+  };
+  document.getElementById("cancel").onclick = closeModal;
+  document.getElementById("save").onclick = saveEvent;
+  overlay.onclick = e => { if (e.target === overlay) closeModal(); };
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+
+  (async () => {
+    try { diaryId = (await (await fetch("/diaries/current")).json()).id; } catch (e) { /* servidor fora do ar */ }
+    load();
+  })();
+</script>
+</body>
+</html>
